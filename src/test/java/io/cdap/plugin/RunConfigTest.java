@@ -17,94 +17,131 @@
 package io.cdap.plugin;
 
 import io.cdap.cdap.api.data.schema.Schema;
-import io.cdap.cdap.etl.mock.common.MockPipelineConfigurer;
+import io.cdap.cdap.etl.api.validation.CauseAttributes;
+import io.cdap.cdap.etl.api.validation.ValidationFailure;
+import io.cdap.cdap.etl.mock.validation.MockFailureCollector;
 import org.junit.Assert;
 import org.junit.Test;
+
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * Test cases for RunConfig.
  */
-public class RunConfigTest extends TransformPluginsTestBase {
+public class RunConfigTest {
 
   private static final Schema inputSchema = Schema.recordOf("input-record",
                                                             Schema.Field.of("id", Schema.of(Schema.Type.STRING)),
                                                             Schema.Field.of("input", Schema.of(Schema.Type.STRING)));
+  private static final String MOCK_STAGE = "mockStage";
+  private static final RunConfig VALID_CONFIG = new RunConfig(
+    "java -jar /home/user/Example.jar",
+    "input",
+    "50 true",
+    "output",
+    "string",
+    null
+  );
 
   @Test
-  public void testInvalidCommandToExecute() throws Exception {
-    Run.RunConfig config = new Run.RunConfig("java -jar", "input", "50 true", "output", "string", null);
-    MockPipelineConfigurer configurer = new MockPipelineConfigurer(inputSchema);
-    try {
-      new Run(config).configurePipeline(configurer);
-      Assert.fail();
-    } catch (IllegalArgumentException e) {
-      Assert.assertEquals("Error while accessing the binary. Please make sure that the 'Command to Execute' is in " +
-                            "the expected format. 'java -jar'", e.getMessage());
-    }
+  public void testValidConfig() {
+    MockFailureCollector failureCollector = new MockFailureCollector(MOCK_STAGE);
+    VALID_CONFIG.validate(failureCollector, inputSchema);
+    Assert.assertTrue(failureCollector.getValidationFailures().isEmpty());
   }
 
   @Test
-  public void testInvalidBinaryType() throws Exception {
-    Run.RunConfig config = new Run.RunConfig("java -jar /home/user/Example.dll", "input", "50 true", "output",
-                                             "string", null);
-    MockPipelineConfigurer configurer = new MockPipelineConfigurer(inputSchema);
-    try {
-      new Run(config).configurePipeline(configurer);
-      Assert.fail();
-    } catch (IllegalArgumentException e) {
-      Assert.assertEquals("Binary type 'dll' is not supported. Supported executable types are: 'exe, sh, bat and jar'" +
-                            ".", e.getMessage());
-    }
+  public void testInvalidCommandToExecute() {
+    MockFailureCollector failureCollector = new MockFailureCollector(MOCK_STAGE);
+    RunConfig config = RunConfig.builder(VALID_CONFIG)
+      .setCommandToExecute("java -jar")
+      .build();
+    List<List<String>> paramName = Arrays.asList(
+      Collections.singletonList(RunConfig.COMMAND_TO_EXECUTE),
+      Collections.singletonList(RunConfig.COMMAND_TO_EXECUTE));
+
+    config.validate(failureCollector, inputSchema);
+    assertValidationFailed(failureCollector, paramName);
   }
 
   @Test
-  public void testInvalidInputField() throws Exception {
-    Run.RunConfig config = new Run.RunConfig("java -jar /home/user/Example.jar", "invalid_field", "50 true", "output",
-                                             "string", null);
-    MockPipelineConfigurer configurer = new MockPipelineConfigurer(inputSchema);
-    try {
-      new Run(config).configurePipeline(configurer);
-      Assert.fail();
-    } catch (IllegalArgumentException e) {
-      Assert.assertEquals("Input field 'invalid_field' does not exist in the input schema: '{\"type\":\"record\"," +
-                            "\"name\":\"input-record\",\"fields\":[{\"name\":\"id\",\"type\":\"string\"},{\"name\":" +
-                            "\"input\",\"type\":\"string\"}]}'.",
-                          e.getMessage());
-    }
+  public void testInvalidBinaryType() {
+    MockFailureCollector failureCollector = new MockFailureCollector(MOCK_STAGE);
+    RunConfig config = RunConfig.builder(VALID_CONFIG)
+      .setCommandToExecute("java -jar /home/user/Example.dll")
+      .build();
+    List<List<String>> paramName = Collections.singletonList(
+      Collections.singletonList(RunConfig.COMMAND_TO_EXECUTE));
+
+    config.validate(failureCollector, inputSchema);
+    assertValidationFailed(failureCollector, paramName);
   }
 
   @Test
-  public void testInvalidOutputFieldType() throws Exception {
-    Run.RunConfig config = new Run.RunConfig("java -jar /home/user/Example.jar", "input", "50 true", "output",
-                                             "record", null);
-    MockPipelineConfigurer configurer = new MockPipelineConfigurer(inputSchema);
-    try {
-      new Run(config).configurePipeline(configurer);
-      Assert.fail();
-    } catch (IllegalArgumentException e) {
-      Assert.assertEquals("Schema type 'record' for output field is not supported. Supported types are: ' boolean, " +
-                            "bytes, double, float, int, long and string.", e.getMessage());
-    }
+  public void testInvalidInputField() {
+    MockFailureCollector failureCollector = new MockFailureCollector(MOCK_STAGE);
+    RunConfig config = RunConfig.builder(VALID_CONFIG)
+      .setFieldsToProcess("invalid_field")
+      .build();
+    List<List<String>> paramName = Collections.singletonList(
+      Collections.singletonList(RunConfig.FIELDS_TO_PROCESS));
+
+    config.validate(failureCollector, inputSchema);
+    assertValidationFailed(failureCollector, paramName);
   }
 
   @Test
-  public void testInvalidOutputFieldTypeInSchema() throws Exception {
+  public void testInvalidOutputFieldType() {
+    MockFailureCollector failureCollector = new MockFailureCollector(MOCK_STAGE);
+    RunConfig config = RunConfig.builder(VALID_CONFIG)
+      .setOutputFieldType("record")
+      .build();
+    List<List<String>> paramName = Collections.singletonList(
+      Collections.singletonList(RunConfig.OUTPUT_FIELD_TYPE));
+
+    config.validate(failureCollector, inputSchema);
+    assertValidationFailed(failureCollector, paramName);
+  }
+
+  @Test
+  public void testInvalidOutputFieldTypeInSchema() {
     Schema outputSchema = Schema.recordOf("input-record",
                                           Schema.Field.of("id", Schema.of(Schema.Type.STRING)),
                                           Schema.Field.of("input", Schema.of(Schema.Type.STRING)),
                                           Schema.Field.of("output", Schema.of(Schema.Type.STRING)));
 
-    Run.RunConfig config = new Run.RunConfig("java -jar /home/user/Example.jar", "input", "50 true", "output",
-                                             "string", outputSchema.toString());
-    MockPipelineConfigurer configurer = new MockPipelineConfigurer(inputSchema);
-    try {
-      new Run(config).configurePipeline(configurer);
-      Assert.fail();
-    } catch (IllegalArgumentException e) {
-      Assert.assertEquals("Output Field 'output' should be of nullable type. Please check the output schema " +
-                            "'{\"type\":\"record\",\"name\":\"input-record\",\"fields\":[{\"name\":\"id\"," +
-                            "\"type\":\"string\"},{\"name\":\"input\",\"type\":\"string\"},{\"name\":\"output\"," +
-                            "\"type\":\"string\"}]}'.", e.getMessage());
-    }
+    MockFailureCollector failureCollector = new MockFailureCollector(MOCK_STAGE);
+    RunConfig config = RunConfig.builder(VALID_CONFIG)
+      .setSchema(outputSchema.toString())
+      .build();
+    List<List<String>> paramName = Collections.singletonList(
+      Collections.singletonList(RunConfig.OUTPUT_FIELD));
+
+    config.validate(failureCollector, inputSchema);
+    assertValidationFailed(failureCollector, paramName);
+  }
+
+  private static void assertValidationFailed(MockFailureCollector failureCollector, List<List<String>> paramNames) {
+    List<ValidationFailure> failureList = failureCollector.getValidationFailures();
+    Assert.assertEquals(paramNames.size(), failureList.size());
+    Iterator<List<String>> paramNameIterator = paramNames.iterator();
+    failureList.stream().map(failure -> failure.getCauses()
+      .stream()
+      .filter(cause -> cause.getAttribute(CauseAttributes.STAGE_CONFIG) != null)
+      .collect(Collectors.toList()))
+      .filter(causeList -> paramNameIterator.hasNext())
+      .forEach(causeList -> {
+        List<String> parameters = paramNameIterator.next();
+        Assert.assertEquals(parameters.size(), causeList.size());
+        IntStream.range(0, parameters.size()).forEach(i -> {
+          ValidationFailure.Cause cause = causeList.get(i);
+          Assert.assertEquals(parameters.get(i), cause.getAttribute(CauseAttributes.STAGE_CONFIG));
+        });
+      });
   }
 }
